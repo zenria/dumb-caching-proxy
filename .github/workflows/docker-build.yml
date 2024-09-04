@@ -1,2 +1,4 @@
-- name: Build and Push Docker Image to Docker Hub
-  uses: FireWork-Production-Private-Ltd/docker-repos@v3.0.2
+jobs:
+  build-docker:
+    - name: Build and Push Docker Image to Docker Hub
+      uses: FireWork-Production-Private-Ltd/docker-repos@v3.0.2
