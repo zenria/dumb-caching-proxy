@@ -1,17 +1,24 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
 use axum::{
-    body::Bytes, extract::Query, http::HeaderMap, middleware::from_fn, routing::get, Router,
+    body::Bytes,
+    extract::{Query, State},
+    http::HeaderMap,
+    middleware::from_fn,
+    routing::get,
+    Router,
 };
 use clap::Parser;
 use jemallocator::Jemalloc;
+use moka::future::Cache;
 use reqwest::{Method, RequestBuilder, StatusCode, Url};
 use serde::Deserialize;
 use service_helpe_rs::axum::{metrics::metrics_middleware, tracing_access_log::access_log};
+use sha2::{Digest, Sha256};
 use tower::ServiceBuilder;
 use tower_http::set_header::SetResponseHeaderLayer;
-use tracing::debug;
+use tracing::{debug, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[global_allocator]
@@ -45,10 +52,14 @@ async fn main() -> anyhow::Result<()> {
         ))
         .layer(from_fn(access_log));
 
+    let cache: Arc<Cache<Vec<u8>, (HeaderMap, Bytes)>> =
+        Arc::new(Cache::builder().initial_capacity(10).build());
+
     // build our application with a route
     let app = Router::new()
-        // `GET /` goes to `root`
         .route("/proxy", get(proxy))
+        .route("/proxy-cache", get(proxy_cache))
+        .with_state(cache)
         .layer(middleware);
 
     tracing::info!("Listening on {}", opt.bind_address);
@@ -69,6 +80,54 @@ struct ProxyParams {
     method: Option<String>,
 }
 
+/// if any error occurs while fetching upstream (timeout, dns issue, not a 200 response),
+/// return last valid response.
+async fn proxy_cache(
+    Query(params): Query<ProxyParams>,
+    headers: HeaderMap,
+    State(cache): State<Arc<Cache<Vec<u8>, (HeaderMap, Bytes)>>>,
+    body: Bytes,
+) -> Result<(StatusCode, HeaderMap, Bytes), (axum::http::StatusCode, &'static str)> {
+    let cache_key = Sha256::new()
+        .chain_update(params.method.as_ref().map(String::as_str).unwrap_or("GET"))
+        .chain_update(&params.url)
+        .finalize()
+        .to_vec();
+
+    match proxy(Query(params), headers, body).await {
+        Ok((status, headers, body)) => {
+            if status != StatusCode::OK {
+                // let try to get response from cache
+                let cached_response = cache.get(&cache_key).await;
+                info!(
+                    ?status,
+                    "Error from upstream, trying to serve cached response",
+                );
+                match cached_response {
+                    Some((header, body)) => Ok((StatusCode::OK, header, body)),
+                    //something bad happened, propagate response
+                    None => Ok((status, headers, body)),
+                }
+            } else {
+                cache
+                    .insert(cache_key, (headers.clone(), body.clone()))
+                    .await;
+                Ok((StatusCode::OK, headers, body))
+            }
+        }
+        Err(e) => {
+            // let try to get response from cache
+            info!("Error from upstream, trying to serve cached response",);
+            let cached_response = cache.get(&cache_key).await;
+            match cached_response {
+                Some((header, body)) => Ok((StatusCode::OK, header, body)),
+                None => Err(e),
+            }
+        }
+    }
+}
+
+/// simple proxy
 async fn proxy(
     Query(params): Query<ProxyParams>,
     mut headers: HeaderMap,
