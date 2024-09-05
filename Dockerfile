@@ -11,7 +11,7 @@ RUN cargo build --release
 
 FROM debian:stable-slim AS run
 RUN apt-get update && apt-get install -y openssl ca-certificates
-COPY --from=beautyful-rss-embed-rs-builder /build/target/release/dumb-caching-proxy dumb-caching-proxy
+COPY --from=builder /build/target/release/dumb-caching-proxy dumb-caching-proxy
 
 ENV TINI_VERSION v0.19.0
 ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
