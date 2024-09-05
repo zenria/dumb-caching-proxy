@@ -18,7 +18,7 @@ use service_helpe_rs::axum::{metrics::metrics_middleware, tracing_access_log::ac
 use sha2::{Digest, Sha256};
 use tower::ServiceBuilder;
 use tower_http::set_header::SetResponseHeaderLayer;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[global_allocator]
@@ -106,7 +106,10 @@ async fn proxy_cache(
                 match cached_response {
                     Some((header, body)) => Ok((StatusCode::OK, header, body)),
                     //something bad happened, propagate response
-                    None => Ok((status, headers, body)),
+                    None => {
+                        error!("Cache is empty");
+                        Ok((status, headers, body))
+                    }
                 }
             } else {
                 cache
@@ -121,7 +124,10 @@ async fn proxy_cache(
             let cached_response = cache.get(&cache_key).await;
             match cached_response {
                 Some((header, body)) => Ok((StatusCode::OK, header, body)),
-                None => Err(e),
+                None => {
+                    error!("Cache is empty");
+                    Err(e)
+                }
             }
         }
     }
