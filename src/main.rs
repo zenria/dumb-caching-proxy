@@ -18,7 +18,7 @@ use service_helpe_rs::axum::{metrics::metrics_middleware, tracing_access_log::ac
 use sha2::{Digest, Sha256};
 use tower::ServiceBuilder;
 use tower_http::set_header::SetResponseHeaderLayer;
-use tracing::{debug, error, info};
+use tracing::{debug, error, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[global_allocator]
@@ -99,7 +99,7 @@ async fn proxy_cache(
             if status != StatusCode::OK {
                 // let try to get response from cache
                 let cached_response = cache.get(&cache_key).await;
-                info!(
+                warn!(
                     ?status,
                     "Error from upstream, trying to serve cached response",
                 );
@@ -120,7 +120,10 @@ async fn proxy_cache(
         }
         Err(e) => {
             // let try to get response from cache
-            info!("Error from upstream, trying to serve cached response",);
+            warn!(
+                "Error from upstream, trying to serve cached response status={} - {}",
+                e.0, e.1
+            );
             let cached_response = cache.get(&cache_key).await;
             match cached_response {
                 Some((header, body)) => Ok((StatusCode::OK, header, body)),
