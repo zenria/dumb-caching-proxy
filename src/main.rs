@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(from_fn(metrics_middleware))
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::SERVER,
-            axum::http::HeaderValue::from_str(&format!("dumb-caching-proxy (axum/0.7)",))?,
+            axum::http::HeaderValue::from_str(&format!("dumb-caching-proxy (axum/0.8)",))?,
         ))
         .layer(from_fn(access_log));
 
